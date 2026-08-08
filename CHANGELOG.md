@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes within the 0.x line are called out explicitly.
 
+## [Unreleased]
+
+### Added
+
+- **MCP server.** `tradingagents-mcp` (or `python -m tradingagents.mcp`) serves
+  the toolkit over the Model Context Protocol, so any MCP client can call the
+  market-data layer the analysts run on plus `run_trading_analysis` for a full
+  multi-agent run. The data tools are unwrapped from the agent toolkit, so the
+  MCP surface cannot drift from what an in-graph analyst sees. Install with
+  `pip install "tradingagents[mcp]"`.
+
 ## [0.3.1] — 2026-07-05
 
 Correctness and stability patch: data look-ahead, graph-router crash-safety,
