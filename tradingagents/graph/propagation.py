@@ -22,6 +22,7 @@ class Propagator:
         asset_type: str = "stock",
         past_context: str = "",
         instrument_context: str = "",
+        account_context: str = "",
     ) -> dict[str, Any]:
         """Create the initial state for the agent graph.
 
@@ -30,12 +31,17 @@ class Propagator:
         ``TradingAgentsGraph.resolve_instrument_context``). When empty, agents
         fall back to ticker-only context via
         ``get_instrument_context_from_state``.
+
+        ``account_context`` is the live brokerage snapshot (positions, buying
+        power) resolved once at run start when a broker is configured; it is
+        empty for the default keyless, execution-free setup.
         """
         return {
             "messages": [("human", company_name)],
             "company_of_interest": company_name,
             "asset_type": asset_type,
             "instrument_context": instrument_context,
+            "account_context": account_context,
             "trade_date": str(trade_date),
             "past_context": past_context,
             "investment_debate_state": InvestDebateState(

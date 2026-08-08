@@ -28,6 +28,8 @@ from tradingagents.agents.utils.agent_utils import (
     resolve_instrument_identity,
 )
 from tradingagents.agents.utils.memory import TradingMemoryLog
+from tradingagents.brokers.errors import BrokerError
+from tradingagents.brokers.execution import ExecutionResult, execute_decision
 from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
@@ -141,6 +143,12 @@ class TradingAgentsGraph:
         self.curr_state = None
         self.ticker = None
         self.log_states_dict = {}  # date to full state dict
+
+        # Brokerage integration (optional, off by default). The connection is
+        # opened per run by propagate() and shared by the account-context read
+        # and the execution leg so a run pays the MCP handshake at most once.
+        self._broker = None
+        self.last_execution: ExecutionResult | None = None
 
         # Graph-shape-affecting run choices, kept for the checkpoint signature.
         self.selected_analysts = tuple(selected_analysts)
@@ -345,6 +353,62 @@ class TradingAgentsGraph:
         identity = resolve_instrument_identity(ticker)
         return build_instrument_context(ticker, asset_type, identity)
 
+    # ------------------------------------------------------------------
+    # Brokerage integration
+    # ------------------------------------------------------------------
+    def _broker_requested(self) -> bool:
+        """True when either account context or execution is switched on."""
+        return bool(
+            self.config.get("broker_context_enabled")
+            or self.config.get("execution_enabled")
+        )
+
+    def _open_broker(self):
+        """Connect to the configured broker, or return None if unavailable.
+
+        Fail-open on purpose: a missing token, an uninstalled ``mcp`` extra, or
+        a brokerage outage must not stop an analysis run that would otherwise
+        succeed. The run simply proceeds without live account context, and the
+        execution leg reports the same failure in its own result.
+        """
+        if not self._broker_requested():
+            return None
+        from tradingagents.brokers.robinhood import RobinhoodBroker
+
+        try:
+            broker = RobinhoodBroker.from_config(self.config)
+            logger.info("Broker capabilities: %s", broker.capabilities().summary())
+            return broker
+        except BrokerError as exc:
+            logger.warning("Broker unavailable; continuing without it: %s", exc)
+            return None
+
+    def resolve_account_context(self, ticker: str) -> str:
+        """Return the live account snapshot for prompt injection, or "".
+
+        Read once per run and threaded through the state exactly like
+        ``instrument_context``, rather than exposed as an LLM tool: the Trader
+        and Portfolio Manager should always see the real book, not only when a
+        model happens to decide to look it up.
+        """
+        if not self.config.get("broker_context_enabled") or self._broker is None:
+            return ""
+        try:
+            return self._broker.get_account(ticker).to_markdown(ticker)
+        except BrokerError as exc:
+            logger.warning("Could not read broker account context: %s", exc)
+            return ""
+
+    def execute_decision(self, ticker: str, rating: str) -> ExecutionResult | None:
+        """Route a final rating to the broker under the configured gates.
+
+        Returns None when execution is switched off. See
+        :mod:`tradingagents.brokers.execution` for what "live" requires.
+        """
+        if not self.config.get("execution_enabled"):
+            return None
+        return execute_decision(rating, ticker, self.config, broker=self._broker)
+
     def _run_signature(self, asset_type: str) -> str:
         """Graph-shape inputs that must invalidate a checkpoint if changed.
 
@@ -374,6 +438,10 @@ class TradingAgentsGraph:
         # Resolve any pending memory-log entries for this ticker before the pipeline runs.
         self._resolve_pending_entries(company_name)
 
+        # One broker connection per run, shared by the account-context read and
+        # the execution leg.
+        self._broker = self._open_broker()
+
         # Recompile with a checkpointer if the user opted in.
         if self.config.get("checkpoint_enabled"):
             self._checkpointer_ctx = get_checkpointer(
@@ -396,6 +464,9 @@ class TradingAgentsGraph:
         try:
             return self._run_graph(company_name, trade_date, asset_type=asset_type)
         finally:
+            if self._broker is not None:
+                self._broker.close()
+                self._broker = None
             if self._checkpointer_ctx is not None:
                 self._checkpointer_ctx.__exit__(None, None, None)
                 self._checkpointer_ctx = None
@@ -422,12 +493,14 @@ class TradingAgentsGraph:
         # deterministically resolved instrument identity for all agents.
         past_context = self.memory_log.get_past_context(company_name)
         instrument_context = self.resolve_instrument_context(company_name, asset_type)
+        account_context = self.resolve_account_context(company_name)
         init_agent_state = self.propagator.create_initial_state(
             company_name,
             trade_date,
             asset_type=asset_type,
             past_context=past_context,
             instrument_context=instrument_context,
+            account_context=account_context,
         )
         args = self.propagator.get_graph_args()
 
@@ -479,7 +552,16 @@ class TradingAgentsGraph:
                 self._run_signature(asset_type),
             )
 
-        return final_state, self.process_signal(final_state["final_trade_decision"])
+        rating = self.process_signal(final_state["final_trade_decision"])
+
+        # Execution runs last, after the analysis is safely logged: an order
+        # placement problem must never cost the user a completed run.
+        self.last_execution = self.execute_decision(company_name, rating)
+        if self.last_execution is not None:
+            final_state["execution_report"] = self.last_execution.to_markdown()
+            logger.info("Execution outcome: %s", self.last_execution.detail)
+
+        return final_state, rating
 
     def _log_state(self, trade_date, final_state):
         """Log the final state to a JSON file."""

@@ -25,6 +25,15 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_GOOGLE_THINKING_LEVEL":   "google_thinking_level",
     "TRADINGAGENTS_OPENAI_REASONING_EFFORT": "openai_reasoning_effort",
     "TRADINGAGENTS_ANTHROPIC_EFFORT":        "anthropic_effort",
+    # Brokerage / execution. Note that arming *live* order placement also
+    # requires TRADINGAGENTS_EXECUTION_ARMED, which is deliberately not a
+    # config key — see tradingagents/brokers/execution.py.
+    "TRADINGAGENTS_BROKER_MCP_URL":               "broker_mcp_url",
+    "TRADINGAGENTS_BROKER_CONTEXT_ENABLED":       "broker_context_enabled",
+    "TRADINGAGENTS_EXECUTION_ENABLED":            "execution_enabled",
+    "TRADINGAGENTS_EXECUTION_MODE":               "execution_mode",
+    "TRADINGAGENTS_EXECUTION_POSITION_FRACTION":  "execution_position_fraction",
+    "TRADINGAGENTS_EXECUTION_MAX_ORDER_NOTIONAL": "execution_max_order_notional",
 }
 
 
@@ -161,4 +170,39 @@ DEFAULT_CONFIG = _apply_env_overrides({
         ".SZ":  "399001.SZ",   # Shenzhen (SZSE Component)
         "":     "SPY",         # default for US-listed tickers (no suffix)
     },
+    # ------------------------------------------------------------------
+    # Brokerage integration (Robinhood MCP) — optional, off by default.
+    # Install with: pip install "tradingagents[robinhood]" and set
+    # ROBINHOOD_MCP_TOKEN. See the README "Live brokerage" section.
+    # ------------------------------------------------------------------
+    "broker_mcp_url": "https://agent.robinhood.com/mcp/trading",
+    "broker_timeout": 30.0,
+    # Inject live positions / buying power into the Trader and Portfolio
+    # Manager prompts. Read-only — needs no execution permissions, and a
+    # broker outage degrades to running without the context, never a failure.
+    "broker_context_enabled": False,
+    # Capability -> tool name, for when runtime discovery guesses wrong,
+    # e.g. {"place_order": "place_equity_order"}. Empty = auto-discover.
+    "broker_tool_map": {},
+    # Canonical field -> extra parameter-name aliases, for servers whose
+    # spelling the built-in alias table misses, e.g. {"quantity": ("share_qty",)}.
+    "broker_arg_map": {},
+    # Literal arguments merged into every order call, for server-required
+    # values nothing can infer, e.g. {"account_id": "..."}.
+    "broker_order_extra_args": {},
+
+    # Order execution. LIVE ORDERS ALSO REQUIRE the environment variable
+    # TRADINGAGENTS_EXECUTION_ARMED=1 — two independent switches, so no config
+    # file alone can send real money. Anything short of both is a dry run.
+    "execution_enabled": False,
+    "execution_mode": "dry_run",            # "dry_run" | "live"
+    "execution_order_type": "market",       # "market" | "limit"
+    "execution_time_in_force": "gfd",
+    "execution_position_fraction": 0.05,    # share of buying power for a full Buy
+    "execution_max_order_notional": 1000.0,  # hard per-order ceiling
+    "execution_min_order_notional": 1.0,    # below this, skip the order
+    "execution_allow_fractional_shares": False,
+    # Rating -> (side, size weight); merged over DEFAULT_RATING_ACTIONS in
+    # tradingagents/brokers/execution.py. Override to retune aggressiveness.
+    "execution_rating_actions": {},
 })

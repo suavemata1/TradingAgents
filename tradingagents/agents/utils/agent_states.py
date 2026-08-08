@@ -48,6 +48,7 @@ class AgentState(MessagesState):
     company_of_interest: Annotated[str, "Company that we are interested in trading"]
     asset_type: Annotated[str, "Asset type under analysis such as stock or crypto"]
     instrument_context: Annotated[str, "Deterministic ticker identity resolved at run start"]
+    account_context: Annotated[str, "Live brokerage account snapshot resolved at run start (empty when no broker is configured)"]
     trade_date: Annotated[str, "What date we are trading at"]
 
     sender: Annotated[str, "Agent that sent this message"]

@@ -42,6 +42,7 @@ __all__ = [
     "build_instrument_context",
     "resolve_instrument_identity",
     "get_instrument_context_from_state",
+    "get_account_context_block",
     "get_language_instruction",
     "create_msg_delete",
 ]
@@ -184,6 +185,25 @@ def get_instrument_context_from_state(state: Mapping[str, Any]) -> str:
     return build_instrument_context(
         str(state["company_of_interest"]),
         state.get("asset_type", "stock"),
+    )
+
+
+def get_account_context_block(state: Mapping[str, Any]) -> str:
+    """Return the live brokerage snapshot as a labelled prompt block.
+
+    Empty string when no broker is configured (the default), so agents that
+    interpolate it pay no tokens and read exactly as they did before. Only the
+    position-taking agents — Trader and Portfolio Manager — consume this: the
+    analysts are meant to judge the instrument, not the current book.
+    """
+    context = state.get("account_context")
+    if not isinstance(context, str) or not context.strip():
+        return ""
+    return (
+        "\n\n---\n\n"
+        f"{context.strip()}\n\n"
+        "Size your recommendation against this real account state rather than "
+        "assuming a flat book or unlimited capital.\n\n---\n"
     )
 
 

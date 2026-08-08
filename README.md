@@ -261,6 +261,75 @@ ta = TradingAgentsGraph(config=config)
 _, decision = ta.propagate("NVDA", "2026-01-15")
 ```
 
+## Live brokerage (Robinhood MCP)
+
+> This is the one part of TradingAgents that can move real money. It is off by default and stays off until you deliberately open two separate switches. Read this whole section before enabling it, and re-read the [disclaimer](https://tauric.ai/disclaimer/): the framework is research software, its ratings are not investment advice, and any order it places is your responsibility.
+
+TradingAgents can connect to Robinhood's hosted MCP server at `https://agent.robinhood.com/mcp/trading` for two independent things: **account context** (read-only) and **execution** (order placement).
+
+```bash
+pip install "tradingagents[robinhood]"
+export ROBINHOOD_MCP_TOKEN=...          # your Robinhood MCP credential
+```
+
+### Account context (read-only)
+
+With `broker_context_enabled`, the run reads your positions and buying power once at start-up and injects them into the **Trader** and **Portfolio Manager** prompts, so both size their recommendation against your real book instead of assuming a flat account and unlimited capital. It never places an order, and it needs no execution permissions.
+
+```python
+config = DEFAULT_CONFIG.copy()
+config["broker_context_enabled"] = True
+ta = TradingAgentsGraph(config=config)
+_, decision = ta.propagate("NVDA", "2026-01-15")
+```
+
+A broker that is unreachable, unconfigured, or missing the `mcp` extra degrades to running without the context — a brokerage problem never fails an analysis run.
+
+### Execution and its two switches
+
+Enabling execution gives you a **dry run**: the pipeline sizes the order the rating implies, reports it, and sends nothing. Placing a real order requires **both** of the following, which is deliberate — one of them cannot live in a config file, so no committed config, copied `.env`, or single mistaken edit can send money on its own:
+
+| Switch | Where | Value |
+| --- | --- | --- |
+| 1 | run config | `execution_enabled=True` **and** `execution_mode="live"` |
+| 2 | environment | `TRADINGAGENTS_EXECUTION_ARMED=1` |
+
+Any other combination is a dry run. Asking for `live` without arming logs a warning and downgrades rather than failing, so an unattended run still completes its analysis.
+
+```python
+config = DEFAULT_CONFIG.copy()
+config["execution_enabled"] = True
+config["execution_mode"] = "live"           # still a dry run without switch 2
+config["execution_position_fraction"] = 0.05  # of buying power for a full Buy
+config["execution_max_order_notional"] = 500  # hard per-order ceiling
+```
+
+The result is returned on `ta.last_execution` and rendered into `final_state["execution_report"]`. Execution runs *after* the analysis is logged, so an order-placement problem never costs you a completed run.
+
+### How ratings become orders
+
+| Rating | Side | Size |
+| --- | --- | --- |
+| Buy | buy | full — `buying_power × execution_position_fraction` |
+| Overweight | buy | half |
+| Hold | — | no order |
+| Underweight | sell | half the held position |
+| Sell | sell | the whole held position |
+
+Buys are sized in notional dollars off buying power; sells are sized in shares off what you actually hold, so a Sell with no position is a no-op rather than a short. Share counts round **down** to whole shares unless `execution_allow_fractional_shares` is set, and every buy is clamped by `execution_max_order_notional`. Override the table itself with `execution_rating_actions`, e.g. `{"Overweight": ("buy", 0.25)}`.
+
+### Tool discovery
+
+The broker does not hardcode Robinhood's tool names. It calls `tools/list` at connect time and matches what the server advertises against capability patterns (`positions`, `account`, `quote`, `place_order`, …), so a vendor-side rename is survivable. When discovery guesses wrong, pin it in config instead of waiting for a patch:
+
+```python
+config["broker_tool_map"] = {"place_order": "place_equity_order"}
+config["broker_arg_map"] = {"quantity": ("share_qty",)}      # extra parameter aliases
+config["broker_order_extra_args"] = {"account_id": "..."}    # server-required literals
+```
+
+Capability discovery is logged at INFO on connect (`Broker capabilities: positions=get_positions, ...`), which is the fastest way to see what your account's server actually exposes.
+
 ## Reproducibility
 
 TradingAgents is LLM-driven, so two runs of the same ticker and date can differ. This is expected for a research tool built on language models, not a defect. The variation comes from a few distinct sources, and it helps to separate them.

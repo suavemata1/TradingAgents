@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes within the 0.x line are called out explicitly.
 
+## [Unreleased]
+
+### Added
+
+- **Live brokerage integration over the Robinhood MCP server.** Optional and
+  off by default (`pip install "tradingagents[robinhood]"`, `ROBINHOOD_MCP_TOKEN`).
+  Two independent features:
+  - **Account context** (`broker_context_enabled`): positions and buying power
+    are read once at run start and injected into the Trader and Portfolio
+    Manager prompts, so both size against the real book rather than assuming a
+    flat account. Read-only; a broker outage degrades to running without the
+    context instead of failing the run.
+  - **Execution** (`execution_enabled`): the Portfolio Manager's 5-tier rating
+    is sized into an order. Placing a *real* order requires both
+    `execution_mode="live"` in config and `TRADINGAGENTS_EXECUTION_ARMED=1` in
+    the environment — two independent switches, one of which cannot live in a
+    config file. Every other combination is a dry run that reports the order it
+    would have placed. Buys are sized in notional off buying power and clamped
+    by `execution_max_order_notional`; sells are sized in shares off the held
+    position, so a Sell with no position is a no-op rather than a short.
+
+  Tool names are discovered at runtime via `tools/list` and matched against
+  capability patterns rather than hardcoded, so a vendor-side rename is
+  survivable; `broker_tool_map`, `broker_arg_map`, and
+  `broker_order_extra_args` pin anything discovery gets wrong.
+
 ## [0.3.1] — 2026-07-05
 
 Correctness and stability patch: data look-ahead, graph-router crash-safety,

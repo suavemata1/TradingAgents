@@ -44,6 +44,11 @@ dev = [
 bedrock = [
     "langchain-aws>=1.5.0",
 ]
+# Live brokerage access over MCP (Robinhood). Optional so the core install
+# stays lean and keyless: pip install "tradingagents[robinhood]".
+robinhood = [
+    "mcp>=1.9",
+]
 
 [project.scripts]
 tradingagents = "cli.main:app"

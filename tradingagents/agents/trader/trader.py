@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage
 
 from tradingagents.agents.schemas import TraderProposal, render_trader_proposal
 from tradingagents.agents.utils.agent_utils import (
+    get_account_context_block,
     get_instrument_context_from_state,
     get_language_instruction,
 )
@@ -24,6 +25,7 @@ def create_trader(llm):
     def trader_node(state, name):
         company_name = state["company_of_interest"]
         instrument_context = get_instrument_context_from_state(state)
+        account_block = get_account_context_block(state)
         investment_plan = state["investment_plan"]
 
         messages = [
@@ -44,7 +46,8 @@ def create_trader(llm):
                     f"plan tailored for {company_name}. {instrument_context} This plan incorporates "
                     f"insights from current technical market trends, macroeconomic indicators, and "
                     f"social media sentiment. Use this plan as a foundation for evaluating your next "
-                    f"trading decision.\n\nProposed Investment Plan: {investment_plan}\n\n"
+                    f"trading decision.\n\nProposed Investment Plan: {investment_plan}\n"
+                    f"{account_block}\n"
                     f"Leverage these insights to make an informed and strategic decision."
                 ),
             },
