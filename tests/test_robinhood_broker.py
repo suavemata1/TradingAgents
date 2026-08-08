@@ -545,5 +545,96 @@ class ExecuteDecisionTests(unittest.TestCase):
         self.assertFalse(broker.closed)
 
 
+# ----------------------------------------------------------------------
+# End to end
+# ----------------------------------------------------------------------
+# A server shaped the way a real brokerage plausibly is: every tool name and
+# argument spelling differs from our canonical vocabulary, order placement has
+# a required account id nothing can infer, and the side is an upper-case enum.
+_REALISTIC_TOOLS = [
+    _spec("get_account_details", description="Balances and buying power"),
+    _spec("get_stock_positions", description="Open equity positions"),
+    _spec("get_stock_quote", {"symbol": {"type": "string"}}),
+    _spec(
+        "place_equity_order",
+        {
+            "instrument": {"type": "string"},
+            "action": {"type": "string", "enum": ["BUY", "SELL"]},
+            "dollar_amount": {"type": "number"},
+            "shares": {"type": "number"},
+            "account_number": {"type": "string"},
+        },
+        required=("instrument", "action", "account_number"),
+    ),
+    _spec("cancel_stock_order", {"order_id": {"type": "string"}}),
+    _spec("get_stock_orders"),
+    _spec("get_watchlist"),
+]
+
+
+@pytest.mark.unit
+class EndToEndTests(unittest.TestCase):
+    CONFIG = {
+        "execution_enabled": True,
+        "execution_mode": "live",
+        "execution_position_fraction": 0.05,
+        "execution_max_order_notional": 1000.0,
+        "execution_min_order_notional": 1.0,
+    }
+
+    def _broker(self):
+        client = FakeClient(_REALISTIC_TOOLS, {
+            "get_account_details": {"buying_power": "4,000.00", "portfolio_value": 21000},
+            "get_stock_positions": [{"symbol": "AAPL", "quantity": "12"}],
+            "place_equity_order": {"id": "order-9"},
+        })
+        return RobinhoodBroker(client, order_extra_args={"account_number": "RH-123"}), client
+
+    def test_every_capability_resolves_from_unfamiliar_names(self):
+        broker, _ = self._broker()
+        self.assertEqual(broker.capabilities().mapping, {
+            "account": "get_account_details",
+            "positions": "get_stock_positions",
+            "quote": "get_stock_quote",
+            "place_order": "place_equity_order",
+            "cancel_order": "cancel_stock_order",
+            "list_orders": "get_stock_orders",
+        })
+
+    def test_unrelated_tools_stay_unmatched(self):
+        broker, _ = self._broker()
+        self.assertNotIn("get_watchlist", broker.capabilities().mapping.values())
+
+    def test_buy_rating_reaches_the_server_correctly_translated(self):
+        broker, client = self._broker()
+        with mock.patch.dict(os.environ, {ARMED_ENV_VAR: "1"}):
+            result = execute_decision("Buy", "AAPL", self.CONFIG, broker=broker)
+
+        self.assertTrue(result.placed)
+        name, args = client.calls[-1]
+        self.assertEqual(name, "place_equity_order")
+        self.assertEqual(args, {
+            "instrument": "AAPL",       # symbol -> instrument
+            "action": "BUY",            # side -> action, coerced to the enum
+            "dollar_amount": 200.0,     # notional -> dollar_amount (4000 * 0.05)
+            "account_number": "RH-123",  # from broker_order_extra_args
+        })
+
+    def test_sell_rating_sends_shares_from_the_held_position(self):
+        broker, client = self._broker()
+        with mock.patch.dict(os.environ, {ARMED_ENV_VAR: "1"}):
+            execute_decision("Sell", "AAPL", self.CONFIG, broker=broker)
+        _name, args = client.calls[-1]
+        self.assertEqual(args["action"], "SELL")
+        self.assertEqual(args["shares"], 12)
+        self.assertNotIn("dollar_amount", args)
+
+    def test_unarmed_run_reaches_the_server_only_for_reads(self):
+        broker, client = self._broker()
+        result = execute_decision("Buy", "AAPL", self.CONFIG, broker=broker)
+        self.assertFalse(result.placed)
+        self.assertNotIn("place_equity_order", [name for name, _ in client.calls])
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

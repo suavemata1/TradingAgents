@@ -330,6 +330,17 @@ config["broker_order_extra_args"] = {"account_id": "..."}    # server-required l
 
 Capability discovery is logged at INFO on connect (`Broker capabilities: positions=get_positions, ...`), which is the fastest way to see what your account's server actually exposes.
 
+### Verify before you arm
+
+Run the inspector against your own account first. It is read-only, performs the handshake, and prints every advertised tool with its schema, the resolved capability map, and — with `--dry-run-order` — the exact arguments an order would carry:
+
+```bash
+ROBINHOOD_MCP_TOKEN=... python scripts/inspect_broker_mcp.py
+ROBINHOOD_MCP_TOKEN=... python scripts/inspect_broker_mcp.py --dry-run-order AAPL Buy
+```
+
+If a capability shows `(unavailable)`, is matched to the wrong tool, or a required argument comes back unfilled, fix it with `broker_tool_map` / `broker_arg_map` / `broker_order_extra_args` and re-run. Only arm live execution once the dry-run output is exactly the order you intend.
+
 ## Reproducibility
 
 TradingAgents is LLM-driven, so two runs of the same ticker and date can differ. This is expected for a research tool built on language models, not a defect. The variation comes from a few distinct sources, and it helps to separate them.
