@@ -41,7 +41,7 @@
 
 <div align="center">
 
-🚀 [TradingAgents](#tradingagents-framework) | ⚡ [Installation & CLI](#installation-and-cli) | 🎬 [Demo](https://www.youtube.com/watch?v=90gr5lwjIho) | 📦 [Package Usage](#tradingagents-package) | 🤝 [Contributing](#contributing) | 📄 [Citation](#citation)
+🚀 [TradingAgents](#tradingagents-framework) | ⚡ [Installation & CLI](#installation-and-cli) | 🎬 [Demo](https://www.youtube.com/watch?v=90gr5lwjIho) | 📦 [Package Usage](#tradingagents-package) | 🔌 [MCP Server](#mcp-server) | 🤝 [Contributing](#contributing) | 📄 [Citation](#citation)
 
 </div>
 
@@ -232,6 +232,60 @@ print(decision)
 ```
 
 See `tradingagents/default_config.py` for all configuration options.
+
+## MCP Server
+
+TradingAgents ships an [MCP](https://modelcontextprotocol.io) server, so any MCP client (Claude Desktop, Claude Code, Cursor, ...) can call the same market-data layer the analyst agents run on — and, when you want it, the full multi-agent pipeline.
+
+```bash
+pip install "tradingagents[mcp]"
+tradingagents-mcp          # stdio transport; also: python -m tradingagents.mcp
+```
+
+### Tools
+
+| Tool | What it does |
+| --- | --- |
+| `get_stock_data` | OHLCV price history for a date range |
+| `get_indicators` | A technical indicator (RSI, MACD, ...) over a trailing window |
+| `get_verified_market_snapshot` | Deterministic price/indicator snapshot for checking exact claims |
+| `get_fundamentals`, `get_balance_sheet`, `get_cashflow`, `get_income_statement` | Company fundamentals and filings |
+| `get_news`, `get_global_news`, `get_insider_transactions` | Ticker news, macro headlines, insider activity |
+| `get_macro_indicators` | FRED series: policy rates, Treasury yields, inflation, labor, growth |
+| `get_prediction_markets` | Market-implied probabilities from Polymarket |
+| `list_data_vendors` | Which vendor currently serves each category |
+| `run_trading_analysis` | The full analyst → debate → trader → risk → Portfolio Manager pipeline |
+
+The data tools are unwrapped from `tradingagents.agents.utils.agent_utils`, so an MCP client sees exactly the tools — and the vendor routing — an in-graph analyst sees. They return in seconds and need only the relevant vendor key.
+
+`run_trading_analysis` drives many LLM calls and takes minutes. It needs an LLM provider key, and accepts `analysts`, `research_depth`, and per-call `llm_provider` / `deep_think_llm` / `quick_think_llm` overrides. It returns the five-tier rating, the Portfolio Manager's decision, and each team's report.
+
+### Client configuration
+
+Point your client at the installed script. MCP clients launch the server with their own working directory, so pass the keys explicitly rather than relying on a `.env` discovered from the current directory:
+
+```json
+{
+  "mcpServers": {
+    "tradingagents": {
+      "command": "tradingagents-mcp",
+      "env": {
+        "OPENAI_API_KEY": "...",
+        "ALPHA_VANTAGE_API_KEY": "...",
+        "FRED_API_KEY": "..."
+      }
+    }
+  }
+}
+```
+
+In Claude Code, the equivalent one-liner is:
+
+```bash
+claude mcp add tradingagents -- tradingagents-mcp
+```
+
+The server reads the same `TRADINGAGENTS_*` environment variables as the CLI — models, debate rounds, output language, cache and results directories — so it is configurable without code changes. Call `list_data_vendors` to see which vendor is currently serving each category.
 
 ## Persistence and Recovery
 
